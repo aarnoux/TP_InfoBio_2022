@@ -97,13 +97,13 @@ def main():
                 listAff[0] = host[0][1:-1]
 
             # Get the name of the organism of interest.
-            #if re.match(" +/organism=.+", line):
-            #    try:
-            #        orga = re.findall("\"[ -~]+\"", line)
-            #    except:
-            #        orga = re.findall("\"[ -~]+", line) + re.findall("[!-~]+\"", next(gb))
-            #    print(orga)
-            #    listAff[1] = orga[0][1:-1]
+            if re.match(" +/organism=.+", line):
+                orga = re.findall("\"[ -~]+\"", line)
+                if len(orga) == 0:
+                    orga = re.findall("\"[ -~]+", line)
+                    orgaTemp = re.findall("[!-~]+\"", next(gb))
+                    orga = str(orga[0])+" "+str(orgaTemp[0])
+                listAff[1] = orga[1:-1]
 
             # Get the protein ID.
             if re.match(" +/protein_id=.+", line):
@@ -127,6 +127,7 @@ def main():
                     if re.match("DEFINITION", lineProt):
                         protProd = re.findall("  [ -~]+ \[", lineProt)
                         listProt[3] = protProd[0][2:-2]
+                        
                 fetchProt.close()
                 print(listProt)
 
