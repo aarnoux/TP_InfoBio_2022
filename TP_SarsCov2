@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Mar 23 13:34:05 2022
+
+Projet UE Information Biologique - M1 Bioinfo
+"""
+
+import re
+import subprocess
+
+from Bio import Entrez
+from Bio import SeqIO
+
+def fetch_gb(liste_id):
+    """Fetch the genbank file for given id."""
+    file = Entrez.efetch(db="nucleotide", id=liste_id, rettype="gb")
+    gb = open("out.gb", 'w')
+    gb.write(file.read())
+    file.close()
+    gb.close()
+
+def fetch_fasta(liste_id):
+    """Fetch the fasta file for given id."""
+    file = Entrez.efetch(db="nucleotide", id=liste_id, rettype="gb")
+    seq = SeqIO.parse(file,"gb")
+    SeqIO.write(seq,"out.fasta","fasta")
+    file.close()
+
+def fetch_seq():
+    """Fetch different relevant files in NCBI."""
+    Entrez.email = "alizee.arnoux@etu.umontpellier.fr"
+    handle = Entrez.esearch(db="Nucleotide", term="NC_045512")
+    record = Entrez.read(handle)
+    liste_id = record["IdList"]
+    fetch_gb(liste_id)
+    fetch_fasta(liste_id)
+
+def main():
+    """Fetch and extract usefull informations to construct SQL database."""
+    fetch_seq()
+    with open("out.gb",'r') as gb, open("results.txt",'w') as results:
+
+        # Initialisation of different lists, corresponding to SQL TABLES of interest.
+        listOrga = ["NULL","NULL","NULL","NULL","NULL","NULL","NULL"]
+        listProt = ["NULL","NULL","NULL","NULL"]
+        listAff = ["NULL","NULL"]
+
+        #listVariant = ["NULL","NULL"]
+        #listEstProd = ["NULL","NULL"]
+        #listOrigine = ["NULL","NULL"]
+
+        temp = []
+
+        # Call a BASH command to get the number of CDS per file (total number - 1 because of the first one that summarizes the sequence data)
+        cds = subprocess.run(["grep", "-c", "CDS","out.gb"], stdout=subprocess.PIPE)
+        cds = int(cds.stdout) - 1
+
+        # Put the result in the place n°7 of ListOrga, corresponding to SQL TABLE "Organisme".
+        # In SQL values have to be given in a very specific order.
+        listOrga[6] = cds
+
+        #dateFirst1 = subprocess.run(["grep JOURNAL out.gb"], stdout=subprocess.PIPE, shell = True)
+        #dateFirst2 = subprocess.run(["awk -F \( '{print substr($3, 0, 4)}'"], input = dateFirst1.stdout, stdout = subprocess.PIPE, shell = True)
+        #print(dateFirst2)
+
+        # Analysis of each line of the genbank file.
+        gb = iter(gb)
+        for line in gb:
+
+            # Get the actual version number.
+            if re.match("VERSION", line):
+                listOrga[1] = line[12:-1]
+
+            # Get the date of first publication.
+            if re.match("[ ].JOURNAL", line):
+                temp.append(line[-6:-2])
+                listOrga[2] = min(temp)
+
+            if re.match("LOCUS", line):
+
+                # Get the ID of the sequence.
+                ncbiID = re.findall("[A-Z]*.[0-9]+", line)
+                listOrga[0] = ncbiID[0]
+
+                # Get the size of the sequence.
+                size = re.findall(" [0-9]+ ", line)
+                listOrga[4] = size[0][1:-1]
+
+                # Get the type of the sequence.
+                typeOrga = re.findall(" [a-z]+ ", line)
+                listOrga[5] = typeOrga[1][1:-1]
+
+            # Get the host organism.
+            if re.match(" +/host=.+", line):
+                host = re.findall("\"[ -~]+\"", line)
+                listAff[0] = host[0][1:-1]
+
+            # Get the name of the organism of interest.
+            #if re.match(" +/organism=.+", line):
+            #    try:
+            #        orga = re.findall("\"[ -~]+\"", line)
+            #    except:
+            #        orga = re.findall("\"[ -~]+", line) + re.findall("[!-~]+\"", next(gb))
+            #    print(orga)
+            #    listAff[1] = orga[0][1:-1]
+
+            # Get the protein ID.
+            if re.match(" +/protein_id=.+", line):
+                protID = re.findall("\"[!-~]+\"", line)
+                listProt[0] = protID[0][1:-1]
+
+                # For each protein, fetch the GenPept file (equivalent of GenBank but for protein).
+                fetchProt = Entrez.efetch(db="protein", id=protID[0][1:-1], rettype="gp")
+                for lineProt in fetchProt:
+                    if re.match("LOCUS", lineProt):
+
+                        # Get the ID (= LOCUS) of the sequence.
+                        protLocus = re.findall(" [!-~]+ ", lineProt)
+                        listProt[1] = protLocus[0][1:-1]
+
+                        # Get the size of the sequence.
+                        protSize = re.findall(" [0-9]+ ", lineProt)
+                        listProt[2] = protSize[0][1:-1]
+
+                    # Get the protein product of the sequence.
+                    if re.match("DEFINITION", lineProt):
+                        protProd = re.findall("  [ -~]+ \[", lineProt)
+                        listProt[3] = protProd[0][2:-2]
+                fetchProt.close()
+                print(listProt)
+
+                # Write in the output file to allow direct importation in SQL database, with correct order of the values.
+                results.write("insert into Proteine values ('"+str(listProt[0])+"','"+str(listProt[1])+"','"+str(listProt[2])+"','"+str(listProt[3])+"');\n")
+
+        # Write in the output file to allow direct importation in SQL database, with correct order of the values.
+        print(listOrga)
+        results.write("insert into Organisme values ('"+str(listOrga[0])+"','"+str(listOrga[1])+"','"+str(listOrga[2])+"','"+str(listOrga[3])+"','"+str(listOrga[4])+"','"+str(listOrga[5])+"','"+str(listOrga[6])+"');\n")
+        print(listAff)
+        results.write("insert into Affecte values ('"+str(listAff[0])+"','"+str(listAff[1])+"');\n")
+
+        results.close()
+
+if __name__ == "__main__":
+    main()
